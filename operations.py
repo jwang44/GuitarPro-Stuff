@@ -27,13 +27,15 @@ def get_single_tracks(file, output_dir):
             os.remove(os.path.join(output_dir, file_name))
 
 
-def get_phrases(single_track_file, output_dir, force_clean=True):
+def get_phrases(
+    single_track_file, output_dir, force_clean=True, disable_mixTableChange=True
+):
     # get 4-bar single-track phrases
     # eliminate phrases where the 4 bars are completely empty
-    # eliminate tempo change? or maybe any type of mixTableChange?
+    # eliminate tempo change? or maybe any type of mixTableChange
     # eliminate repeats?
     # eliminate alternate-endings?
-    # force clean_electric_guitar instrument channel?
+    # force clean_electric_guitar instrument channel
     BAR_COUNT = 4
     try:
         song = guitarpro.parse(single_track_file)
@@ -44,6 +46,16 @@ def get_phrases(single_track_file, output_dir, force_clean=True):
     assert len(song.tracks) == 1
     track = song.tracks[0]
     measures = track.measures
+
+    # disable mixTableChange in all beats
+    # this includes tempo changes, which mess up the calculation of note timings
+    # and other mysterious effect/instrument changes
+    if disable_mixTableChange:
+        for measure in measures:
+            for voice in measure.voices:
+                for beat in voice.beats:
+                    beat.effect.mixTableChange = None
+
     bar_phrases = [
         measures[i : i + BAR_COUNT] for i in range(0, len(measures), BAR_COUNT)
     ]
