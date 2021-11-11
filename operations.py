@@ -10,11 +10,14 @@ def hello():
     print("hello world")
 
 
-def get_single_tracks(file, output_dir):
+def get_single_tracks(file, output_dir, unify_volume=True):
     song = guitarpro.parse(file)
     # tempo = song.tempo
     tracks = get_guitar_tracks(song)
     for track in tracks:
+        # unify the volume for rendered audio
+        if unify_volume:
+            track.channel.volume = 100
         single_track_song = song  # this preserves the metadata in orginal song
         single_track_song.tracks = [track]
         file_name = "{}_{}.gp5".format(
@@ -28,7 +31,11 @@ def get_single_tracks(file, output_dir):
 
 
 def get_phrases(
-    single_track_file, output_dir, force_clean=True, disable_mixTableChange=True
+    single_track_file,
+    output_dir,
+    force_clean=True,
+    disable_mixTableChange=True,
+    disable_repeats=True,
 ):
     # get 4-bar single-track phrases
     # eliminate phrases where the 4 bars are completely empty
@@ -46,6 +53,17 @@ def get_phrases(
     assert len(song.tracks) == 1
     track = song.tracks[0]
     measures = track.measures
+
+    # disable repeats in all measures
+    # this includes repeats and alternative endings
+    if disable_repeats:
+        for measure in measures:
+            # isRepeatOpen is boolean, repeatClose takes -1 or 1,
+            # repeatAlternative can be whatever number, depending on which repeat group it belongs to
+            # the following is the default setting in normal bars
+            measure.header.isRepeatOpen = False
+            measure.header.repeatClose = -1
+            measure.header.repeatAlternative = 0
 
     # disable mixTableChange in all beats
     # this includes tempo changes, which mess up the calculation of note timings
