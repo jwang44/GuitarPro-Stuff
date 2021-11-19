@@ -10,7 +10,14 @@ def hello():
     print("hello world")
 
 
-def get_single_tracks(file, output_dir, unify_volume=True):
+def get_single_tracks(
+    file,
+    output_dir,
+    unify_volume=True,
+    force_clean=True,
+    disable_repeats=True,
+    disable_mixTableChange=True,
+):
     song = guitarpro.parse(file)
     # tempo = song.tempo
     tracks = get_guitar_tracks(song)
@@ -18,6 +25,28 @@ def get_single_tracks(file, output_dir, unify_volume=True):
         # unify the volume for rendered audio
         if unify_volume:
             track.channel.volume = 100
+        # force the instrument to be clean electric guitar, so that synthesized audio is automatically clean guitar
+        if force_clean:
+            track.channel.instrument = 27
+
+        # disable repeats in all measures
+        # this includes repeats and alternative endings
+        for measure in track.measures:
+            if disable_repeats:
+                # isRepeatOpen is boolean, repeatClose takes -1 or 1,
+                # repeatAlternative can be whatever number, depending on which repeat group it belongs to
+                # the following is the default setting in normal bars
+                measure.header.isRepeatOpen = False
+                measure.header.repeatClose = -1
+                measure.header.repeatAlternative = 0
+            # disable mixTableChange in all beats
+            # this includes tempo changes, which mess up the calculation of note timings
+            # and other mysterious effect/instrument changes
+            if disable_mixTableChange:
+                for voice in measure.voices:
+                    for beat in voice.beats:
+                        beat.effect.mixTableChange = None
+
         single_track_song = song  # this preserves the metadata in orginal song
         single_track_song.tracks = [track]
         file_name = "{}_{}.gp5".format(
@@ -30,9 +59,9 @@ def get_single_tracks(file, output_dir, unify_volume=True):
             os.remove(os.path.join(output_dir, file_name))
 
 
-# TODO: Do I really need to break the single-tracks into phrases?
-# Why not just use the single tracks? At least it can work for the poly detector.
-# This can save a lot of trouble when synthesizing into audio later.
+# this function may come in handy in later tasks, but for now, using get_single_tracks is sufficient
+# it saves much time in synthesizing audio files
+# the optional parameters here are also implemented in get_single_tracks
 def get_phrases(
     single_track_file,
     output_dir,
