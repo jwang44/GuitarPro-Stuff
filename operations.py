@@ -30,20 +30,22 @@ def get_single_tracks(file, output_dir, unify_volume=True):
             os.remove(os.path.join(output_dir, file_name))
 
 
+# TODO: Do I really need to break the single-tracks into phrases?
+# Why not just use the single tracks? At least it can work for the poly detector.
+# This can save a lot of trouble when synthesizing into audio later.
 def get_phrases(
     single_track_file,
     output_dir,
     force_clean=True,
     disable_mixTableChange=True,
     disable_repeats=True,
+    bar_count=4,
 ):
     # get 4-bar single-track phrases
-    # eliminate phrases where the 4 bars are completely empty
-    # eliminate tempo change? or maybe any type of mixTableChange
-    # eliminate repeats?
-    # eliminate alternate-endings?
+    # remove phrases where the 4 bars are completely empty
+    # disable any mixTableChange, including tempo change
+    # disable repeats and alternate-endings
     # force clean_electric_guitar instrument channel
-    BAR_COUNT = 4
     try:
         song = guitarpro.parse(single_track_file)
     except GPException:
@@ -75,7 +77,7 @@ def get_phrases(
                     beat.effect.mixTableChange = None
 
     bar_phrases = [
-        measures[i : i + BAR_COUNT] for i in range(0, len(measures), BAR_COUNT)
+        measures[i : i + bar_count] for i in range(0, len(measures), bar_count)
     ]
     for i, phrase in enumerate(bar_phrases):
         if not all(len(get_measure_notes(measure)) == 0 for measure in phrase):
@@ -97,43 +99,37 @@ def get_phrases(
         # raise Exception(f"empty measure found in {single_track_file.split('/')[-1]} - {i}")
 
 
-"""below is subject to change"""
-
-
-def get_anno(file, output_dir):
-    # for pre-processed one-track files only
-    try:
-        single_track_song = guitarpro.parse(file)
-    except GPException:
-        print(f"GPEXCEPTION in parsing {file.split('/')[-1]}")
-        return
-
-    data = dict()
-    metadata = get_metadata(single_track_song)
-    data["meta"] = metadata
-
-    gt_tracks = get_guitar_tracks(single_track_song)
-    assert len(single_track_song.tracks) == 1
-    track = single_track_song.tracks[0]
-    track_info = get_track_info(track)
-
-    measures = []
-    for measure in track.measures:
-        measure_info = get_measure_info(measure)
-        notes = []
-        for note in get_measure_notes(measure):
-            note_info = get_note_info(note)
-            note_time = get_note_time(note, metadata["tempo"])
-            note_info.update(note_time)
-            notes.append(note_info)
-            measure_info["notes"] = notes
-        measures.append(measure_info)
-
-    track_info["measures"] = measures
-    data["track"] = track_info
-
-    file_name = "{}.json".format(file.split("/")[-1].split(".")[0])
-
-    with open(os.path.join(output_dir, file_name), "w") as file:
-        json.dump(data, file, indent=2)
-
+def poly_vs_mono(song):
+    # return the time stamps for mono and poly segments of the song
+    bpm = song.tempo
+    poly_segments = []
+    mono_segments = []
+    previous_beat_status = 0
+    beats = []
+    for measure in song.tracks[0].measures:
+        # for voice in measure.voices[0]:
+        voice = measure.voices[0]
+        beats.extend(voice.beats)
+    for beat in beats:
+        onset = beat.start
+        onset_sec = round(((onset - 960) / 960) / (bpm / 60), 4)
+        dur = beat.duration.time
+        dur_sec = round((dur / 960) / (bpm / 60), 4)
+        offset_sec = onset_sec + dur_sec
+        # 2 for polyphonic, 1 for monophonic and silence
+        beat_status = 2 if len(beat.notes) > 1 else 1
+        if beat_status != previous_beat_status:
+            # if current beat status is different from the previous beat, add the timing to the output list
+            # the following lines can obviously be better written, I leave it like this just for clarity
+            if beat_status == 2:
+                poly_segments.append([onset_sec, offset_sec])
+            if beat_status == 1:
+                mono_segments.append([onset_sec, offset_sec])
+        else:
+            # if current beat status is the same as the previous one, update the offset of the entry
+            if beat_status == 2:
+                poly_segments[-1][1] = offset_sec
+            if beat_status == 1:
+                mono_segments[-1][1] = offset_sec
+        previous_beat_status = beat_status
+    return poly_segments, mono_segments
