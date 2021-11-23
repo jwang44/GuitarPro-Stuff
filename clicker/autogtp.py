@@ -1,7 +1,7 @@
 """
 1. Open an irrelevant file in Guitar Pro 
-2. Double click the window to make sure it fits the screen
-3. Put the Guitar Pro window on laptop screen
+2. Put the Guitar Pro window on laptop screen
+3. Double click the window to make sure it fits the screen
 4. Run this directly in VSCode
 5. After finishing the FILE_COUNT files, go to finder and move the finished files to another directory
 """
@@ -23,6 +23,7 @@ for i in range(FILE_COUNT):
     time.sleep(3)
     # down button multiple times to locate different files
     # the n-th file requires n downs
+    # sometimes GuitarPro software doesn't respond to down button, just stop and try again several times
     for j in range(i + 1):
         pyautogui.typewrite(["down"])
 
