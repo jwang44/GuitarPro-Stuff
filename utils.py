@@ -1,3 +1,6 @@
+import numpy as np
+
+
 def get_metadata(song):
     metadata = {
         "title": song.title,
@@ -158,3 +161,9 @@ def get_note_time(note, bpm):
     time = {"start": start_sec, "dur": dur_sec}
     return time
 
+
+def normalize_audio(y):
+    # song-level normalization? frame-level normalization?
+    y = y - np.mean(y)
+    y_norm = y / max(abs(y))
+    return y_norm
