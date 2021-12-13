@@ -2,3 +2,4 @@
 __pycache__/*
 clicker/click.py
 .DS_Store
+*.wav
