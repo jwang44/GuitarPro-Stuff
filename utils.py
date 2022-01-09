@@ -104,8 +104,16 @@ def get_measure_notes(measure):
             return notes
 
 
-def get_note_info(note):
+def get_note_info(note, bpm, margin=None):
+    """
+    This is the comprehensive function for generating note-level annotation
+
+    It calls `get_note_time` and `get_effect_info`
+
+    `margin` is for passing in the global onset of the segment and calculate the note start time in the segment
+    """
     note_info = {
+        "time": get_note_time(note, bpm, margin=margin),
         "string": note.string,
         "fret": note.value,  # fret number
         # "dur_percent": note.durationPercent,
@@ -118,15 +126,23 @@ def get_note_info(note):
 
 def get_effect_info(effect):
     effect_info = {
-        "ghost_note": effect.ghostNote,  # bool
+        # ghost notes don't sound much different from normal notes, maybe just treat them as normal notes
+        # "ghost_note": effect.ghostNote,  # bool
         "hammer": effect.hammer,  # bool
         "mute": effect.palmMute,  # bool
         "vibrato": effect.vibrato,  # bool
+        "harmonic": effect.isHarmonic,  # bool
+        "slide": bool(effect.slides),  # bool
+        "bend": bool(effect.isBend),  # bool,
+        # isBend is special, definition is:
+        # def isBend(self):
+        #     return self.bend is not None and len(self.bend.points)
+        "grace": effect.isGrace,  # bool
     }
 
     # if effect.isHarmonic:
     #   effect_info["harmonic_type"] = effect.harmonic.type.name # natural=1, artificial=2, tapped=3, pinch=4, semi=5
-    effect_info["harmonic"] = True if effect.isHarmonic else False
+    # effect_info["harmonic"] = True if effect.isHarmonic else False
 
     effect_info["bend_type"] = effect.bend.type.name if effect.isBend else None
     effect_info["bend_value"] = effect.bend.value if effect.isBend else None
@@ -135,27 +151,28 @@ def get_effect_info(effect):
         [slide.name for slide in effect.slides] if effect.slides else None
     )
 
-    if effect.isGrace:
-        effect_info[
-            "grace_dur"
-        ] = effect.grace.durationTime  # grace note effect duration
-        effect_info["grace_fret"] = effect.grace.fret
-        effect_info[
-            "grace_transition"
-        ] = (
-            effect.grace.transition.name
-        )  # GraceEffectTransition class, none=0, slide=1, bend=2, hammer=3
+    effect_info["grace_dur"] = effect.grace.durationTime if effect.isGrace else None
+    effect_info["grace_fret"] = effect.grace.fret if effect.isGrace else None
+    effect_info["grace_trans"] = (
+        effect.grace.transition.name if effect.isGrace else None
+    )
+    # GraceEffectTransition class, none=0, slide=1, bend=2, hammer=3
 
-    if effect.isTrill:  # TrillEffect, hammerOnPullOff
-        effect_info["trill_fret"] = effect.trill.fret
-        effect_info["trill_dur"] = effect.trill.duration.time
+    # there is no trill instance in the dataset
+    # if effect.isTrill:  # TrillEffect
+    #     effect_info["trill_fret"] = effect.trill.fret
+    #     effect_info["trill_dur"] = effect.trill.duration.time
 
     return effect_info
 
 
-def get_note_time(note, bpm):
+def get_note_time(note, bpm, margin=None):
     start = note.beat.start
     start_sec = round(((start - 960) / 960) / (bpm / 60), 4)
+    # the note timing info encoded in a GP file is global, i.e., the start time in the song
+    # I want the start time in the segment, `margin` is the start time of the segment
+    if margin:
+        start_sec = start_sec - margin
     dur = note.beat.duration.time
     dur_sec = round((dur / 960) / (bpm / 60), 4)
     time = {"start": start_sec, "dur": dur_sec}
