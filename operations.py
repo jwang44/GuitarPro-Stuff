@@ -162,3 +162,62 @@ def poly_vs_mono(song):
                 mono_segments[-1][1] = offset_sec
         previous_beat_status = beat_status
     return poly_segments, mono_segments
+
+
+def gen_anno(file, anno_dir):
+    # input: a clean single track GTP file
+    # output: a series of JSON files,
+    #   each JSON file is a list of note infos for a mono segment,
+    #   the JSON files are segment-level annotations for the mono audio segments
+
+    song = guitarpro.parse(file)
+    # only process single track GP files
+    assert len(song.tracks) == 1
+
+    # put all beats of the song in one place
+    beats = []
+    for measure in song.tracks[0].measures:
+        beats.extend(measure.voices[0].beats)
+
+    segment_idx = 0
+    segments = []  # a list of lists
+    segment = []  # a list of beat instances
+    for i, beat in enumerate(beats):
+        # if poly beat or the last beat, add the accumulated `segment` list to `segments`
+        if len(beat.notes) > 1 or i == len(beats) - 1:
+            if segment:
+                segments.append(segment)
+                segment_idx += 1
+                # restart accumulation
+                segment = []
+        # if mono beat, accumulate beat instances in the `segment` list
+        else:
+            segment.append(beat)
+
+    # the tempo is required for calculating the time in seconds
+    bpm = song.tempo
+    for i, segment in enumerate(segments):
+        segment_start = segment[0].start
+        segment_start_sec = round(((segment_start - 960) / 960) / (bpm / 60), 4)
+
+        note_infos = []
+        for beat in segment:
+            assert len(beat.notes) < 2
+            if beat.notes:
+                note = beat.notes[0]
+                note_info = get_note_info(note, bpm, segment_start_sec)
+                # if current note is tied, add its duration to the previous note
+                if note_info["type"] == "tie":
+                    try:
+                        note_infos[-1]["time"]["dur"] = (
+                            note_infos[-1]["time"]["dur"] + note_info["time"]["dur"]
+                        )
+                    except IndexError:
+                        # when there's no previous note, just ignore it and move on
+                        continue
+                else:
+                    note_infos.append(note_info)
+
+        song_name = file.split("/")[-1].split(".")[0]
+        with open(os.path.join(anno_dir, f"{song_name}_{i}.json"), "w") as outfile:
+            json.dump(note_infos, outfile, indent=4)
