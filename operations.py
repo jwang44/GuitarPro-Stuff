@@ -6,10 +6,6 @@ import json
 from utils import *
 
 
-def hello():
-    print("hello world")
-
-
 def get_single_tracks(
     file,
     output_dir,
@@ -18,6 +14,16 @@ def get_single_tracks(
     disable_repeats=True,
     disable_mixTableChange=True,
 ):
+    """Split one multi-track GuitarPro file into several one-track GuitarPro files
+
+    Args:
+        file (str): The path to the file to split
+        output_dir (str): The directory for the output files
+        unify_volume (bool, optional): Whether to adjust the volume of every track to the same level. Defaults to True.
+        force_clean (bool, optional): Whether to force all tracks to use the clean electric guitar tone. Defaults to True.
+        disable_repeats (bool, optional): Whether to disable all repeats and alternate endings in the GuitarPro file. Defaults to True.
+        disable_mixTableChange (bool, optional): Whether to disable mixTableChange instances (e.g., tempo change in the middle of the song). Defaults to True.
+    """
     song = guitarpro.parse(file)
     # tempo = song.tempo
     tracks = get_guitar_tracks(song)
@@ -129,7 +135,14 @@ def get_phrases(
 
 
 def poly_vs_mono(song):
-    # return the time stamps for mono and poly segments of the song
+    """Return the time stamps for the start and end of each monophonic / polyphonic segments in the song
+
+    Args:
+        song (Song): A pyguitarpro Song object. The song to analyze
+
+    Returns:
+        list, list: A list of (start, end) time stamps for all mono segments, and another list for all poly segments
+    """
     bpm = song.tempo
     poly_segments = []
     mono_segments = []
@@ -165,11 +178,21 @@ def poly_vs_mono(song):
 
 
 def gen_anno(file, anno_dir):
-    # input: a clean single track GTP file
-    # output: a series of JSON files,
-    #   each JSON file is a list of note infos for a mono segment,
-    #   the JSON files are segment-level annotations for the mono audio segments
+    """Generate note-info annotation JSON files for mono audio segments
 
+    The input file is a clean single-track GuitarPro file (the whole track)
+
+    The track is segmented under the hood. Only mono segments are analyzed
+
+    Each generated JSON file is a list of note-infos for one mono segment,
+    and it works as an annotation for the corresponding audio segment
+
+    For one input GuitarPro file, the number of generated JSON files should be the same as the number of mono segments 
+    
+    Args:
+        file (str): The path to the single-track GuitarPro file
+        anno_dir (str): The directory to put generated JSON files
+    """
     song = guitarpro.parse(file)
     # only process single track GP files
     assert len(song.tracks) == 1
@@ -183,8 +206,8 @@ def gen_anno(file, anno_dir):
     segments = []  # a list of lists
     segment = []  # a list of beat instances
     for i, beat in enumerate(beats):
-        # if poly beat or the last beat, add the accumulated `segment` list to `segments`
-        if len(beat.notes) > 1 or i == len(beats) - 1:
+        # if poly beat, add the accumulated `segment` list to `segments`
+        if len(beat.notes) > 1:
             if segment:
                 segments.append(segment)
                 segment_idx += 1
@@ -193,6 +216,9 @@ def gen_anno(file, anno_dir):
         # if mono beat, accumulate beat instances in the `segment` list
         else:
             segment.append(beat)
+            # if it is also the last beat, add the final `segment` to `segments`
+            if i == len(beats) - 1:
+                segments.append(segment)
 
     # the tempo is required for calculating the time in seconds
     bpm = song.tempo
@@ -218,6 +244,6 @@ def gen_anno(file, anno_dir):
                 else:
                     note_infos.append(note_info)
 
-        song_name = file.split("/")[-1].split(".")[0]
-        with open(os.path.join(anno_dir, f"{song_name}_{i}.json"), "w") as outfile:
+        track_title, _ = os.path.splitext(file.split("/")[-1])
+        with open(os.path.join(anno_dir, f"{track_title}_{i}.json"), "w") as outfile:
             json.dump(note_infos, outfile, indent=4)
