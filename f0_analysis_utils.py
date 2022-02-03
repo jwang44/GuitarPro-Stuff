@@ -47,7 +47,7 @@ def plot_f0_vs_gt(file, audio_dir=MONO_SEGMENTS_DIR, anno_dir=ANNO_DIR):
     f0, _, _ = librosa.pyin(
         y,
         fmin=librosa.note_to_hz("C2"),
-        fmax=librosa.note_to_hz("E6"),
+        fmax=librosa.note_to_hz("G6"),
         sr=sr,
         center=False,
     )
@@ -75,11 +75,12 @@ def plot_f0_vs_gt(file, audio_dir=MONO_SEGMENTS_DIR, anno_dir=ANNO_DIR):
     plt.show()
 
 
-def get_continous_f0_segments(notes):
+def get_continous_f0_segments(notes, dur_thres=80):
     """Given an estimated F0 curve, split it (on NaNs) into continuous segments
 
     Args:
         notes (np.Array): The estimated F0 sequence converted to MIDI note sequence
+        dur_thres (int): The duration threshold for a single note event. Defaults to 80 ms. 
 
     Returns:
         list of F0 segment indices: A list of lists. Each list consists of the indices of a continuous F0 segment
@@ -93,16 +94,25 @@ def get_continous_f0_segments(notes):
 
     # group the consecutive indices into index_segments
     f0_segments = consecutive(valid_indices)
-    return f0_segments
+    dur_thres_fr = librosa.time_to_frames(
+        dur_thres / 1000, sr=44100, hop_length=512, n_fft=2048
+    )
+    valid_f0_segments = [
+        f0_segment for f0_segment in f0_segments if len(f0_segment) >= dur_thres_fr
+    ]
+    return valid_f0_segments
 
 
-def get_note_events_from_f0_segment(notes, f0_segment, f0_change_threshold=0.5):
+def get_note_events_from_f0_segment(
+    notes, f0_segment, f0_change_thres=0.5, dur_thres=80
+):
     """Split a continuous F0 segment (on large freq change) into note events
 
     Args:
         notes (np.Array): The estimated F0 sequence converted to MIDI note sequence
         f0_segment (list): A list of indices that belong to a single continuous F0 segment, obtained from `get_continous_f0_segments(notes)`
-        f0_change_threshold (float, optional): Cut the F0 segment where the difference between two adjacent frames exceeds this threshold. Defaults to 0.5 semitones.
+        f0_change_threshold (float, optional): Cut the F0 segment where the difference between two adjacent frames exceeds this threshold. Defaults to 0.5 whole steps.
+        dur_thres (int): The duration threshold for a single note event. Defaults to 80 ms. 
 
     Returns:
         list of note events indices: A list of lists. Each list consists of the indices of a note event
@@ -115,9 +125,9 @@ def get_note_events_from_f0_segment(notes, f0_segment, f0_change_threshold=0.5):
     note_event = [f0_segment[0]]
     note_events = []
 
-    # TODO: this assumes the f0 segment has at least two frames
+    # this assumes the f0 segment has at least two frames
     for i in f0_segment[1:]:
-        if abs(notes[i] - previous_note) <= f0_change_threshold:
+        if abs(notes[i] - previous_note) <= f0_change_thres:
             note_event.append(i)
             if i == f0_segment[-1]:
                 note_events.append(note_event)
@@ -125,7 +135,14 @@ def get_note_events_from_f0_segment(notes, f0_segment, f0_change_threshold=0.5):
             note_events.append(note_event)
             note_event = [i]
         previous_note = notes[i]
-    return note_events
+
+    dur_thres_fr = librosa.time_to_frames(
+        dur_thres / 1000, sr=44100, hop_length=512, n_fft=2048
+    )
+    valid_note_events = [
+        note_event for note_event in note_events if len(note_event) >= dur_thres_fr
+    ]
+    return valid_note_events
 
 
 # functions for picking BEND/RELEASE candidates
@@ -179,7 +196,7 @@ def count_consecutive_drop(diff):
     return max_cnt
 
 
-def is_bend_candidate(notes):
+def is_bend_candidate(notes, dur_thres=80):
     """Given a F0 sequence, predict whether it is a bend instance.
 
     The conditions here are very easy to satisfy, the goal is to reach high recall. 
@@ -187,14 +204,17 @@ def is_bend_candidate(notes):
 
     Args:
         notes (np.Array): An F0 sequence (converted to MIDI note sequence) of a valid note event
+        dur_thres (int): The F0 must keep rising for at least `dur_thres` ms. Defaults to 80 ms. 
 
     Returns:
         bool: True for bend, False for not bend
     """
     diff = np.diff(notes, 1)
-    # the freq should RISE monotonically for at least a certain number of frames
-    # the diff should consistently stay POSITIVE/ZERO for a certain length
-    condition1 = count_consecutive_rise(diff) >= 2
+    # the freq should RISE monotonically for dur_thres ms
+    dur_thres_fr = librosa.time_to_frames(
+        dur_thres / 1000, sr=44100, hop_length=512, n_fft=2048
+    )
+    condition1 = count_consecutive_rise(diff) >= dur_thres_fr
     # the freq difference between two consectutive frames should be smaller than one semitone
     condition2 = np.all(abs(diff) <= 0.5)
     # the difference between the max and min freq should be more than half a semitone
@@ -205,7 +225,7 @@ def is_bend_candidate(notes):
         return False
 
 
-def is_release_candidate(notes):
+def is_release_candidate(notes, dur_thres=80):
     """Given a F0 sequence, predict whether it is a release instance.
 
     The conditions here are very easy to satisfy, the goal is to reach high recall. 
@@ -213,14 +233,17 @@ def is_release_candidate(notes):
 
     Args:
         notes (np.Array): An F0 sequence (converted to MIDI note sequence) of a valid note event
+        dur_thres (int): The F0 must keep dropping for at least `dur_thres` ms. Defaults to 80 ms. 
 
     Returns:
         bool: True for release, False for not release
     """
     diff = np.diff(notes, 1)
-    # the freq should DROP monotonically for at least a certain number of frames
-    # the diff should consistently stay NEGATIVE/ZERO for a certain length
-    condition1 = count_consecutive_drop(diff) >= 2
+    # the freq should DROP monotonically for dur_thres ms
+    dur_thres_fr = librosa.time_to_frames(
+        dur_thres / 1000, sr=44100, hop_length=512, n_fft=2048
+    )
+    condition1 = count_consecutive_drop(diff) >= dur_thres_fr
     # the freq difference between two consectutive frames should be smaller than one semitone
     condition2 = np.all(abs(diff) <= 0.5)
     # the difference between the max and min freq should be more than half a semitone
@@ -233,28 +256,39 @@ def is_release_candidate(notes):
 
 # functions for picking VIBRATO candidates
 def is_vibrato_candidate(
-    notes, peak_count=2, peak_dist_min=2, peak_dist_max=17, pitch_diff=0.5
+    notes, peak_count=2, peak_dist_min=60, peak_dist_max=800, pitch_diff=0.5
 ):
     """Given the F0 sequence of a note event, predict whether it is a VIBRATO instance。
 
     Args:
         notes (np.Array): The F0 sequence (converted to MIDI notes) of a note event
-        peak_count (int, optional): To qualify as VIBRATO, the note must have more than `peak_count` local maxima. Defaults to 2.
-        peak_dist_min (int, optional): To qualify as VIBRATO, the distance between to adjancent peaks must be between `peak_dist_min` and `peak_dist_max`. Defaults to 2 frames (60ms / 46ms).
-        peak_dist_max (int, optional): Defaults to 17 frames（800ms / 46ms).
-        pitch_diff (float, optional): To qualify as VIBRATO, the difference between the highest peak and the mean value must be less than `pitch_diff` whole steps. Defaults to 0.5.
+        peak_count (int, optional): The note must have more than `peak_count` local maxima. Defaults to 2.
+        peak_dist_min (int, optional): The distance between to adjancent peaks must be more than `peak_dist_min` ms. Defaults to 60 ms.
+        peak_dist_max (int, optional): The distance between to adjancent peaks must be less than `peak_dist_max` ms. Defaults to 800 ms.
+        pitch_diff (float, optional): The difference between the highest peak and the mean value must be less than `pitch_diff` whole steps. Defaults to 0.5.
 
     Returns:
         bool: True for vibrato, False for not vibrato
     """
+    # find local maxima in the pitch curve of the note event
     peak_indices, _ = find_peaks(notes)
     condition1 = len(peak_indices) >= peak_count
+    # get the distance (in frames) between adjacent peaks
     peak_dists = np.diff(peak_indices, 1)
+    # convert distance thresholds from time to frame
+    peak_dist_min_fr = librosa.time_to_frames(
+        peak_dist_min / 1000, sr=44100, hop_length=512, n_fft=2048
+    )
+    peak_dist_max_fr = librosa.time_to_frames(
+        peak_dist_max / 1000, sr=44100, hop_length=512, n_fft=2048
+    )
+    # True if any two adjacent peaks satisfy the distance threshold
     condition2 = (
-        np.any(peak_dists >= peak_dist_min and peak_dists <= peak_dist_max)
+        np.any(peak_dists >= peak_dist_min_fr and peak_dists <= peak_dist_max_fr)
         if condition1
         else False
     )
+    # True if the highest peak does not exceed the average too much
     condition3 = (
         np.max(notes[peak_indices]) - np.mean(notes) <= pitch_diff
         if condition1
