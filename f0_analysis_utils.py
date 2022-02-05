@@ -12,9 +12,33 @@ MONO_SEGMENTS_DIR = "/Volumes/MacOnly/UG_proc/all_time_top_by_hits/mono_audio_se
 ANNO_DIR = (
     "/Volumes/MacOnly/UG_proc/all_time_top_by_hits/clean_single_track_annotations"
 )
+# the directory for preprocessed audio files (mono audio segments that has a reasonable length)
 FILTERED_AUDIO_DIR = (
     "/Volumes/MacOnly/UG_proc/all_time_top_by_hits/mono_audio_segments_filtered"
 )
+
+
+def load_audio_file(file):
+    """Generic function for loading an audio file into time and frequency.
+
+    Args:
+        file (str): The audio file name
+
+    Returns:
+        tuple: (times, notes), the time sequence and F0 sequence converted to MIDI notes
+    """
+    y, sr = librosa.load(os.path.join(FILTERED_AUDIO_DIR, file), sr=None)
+    f0, _, _ = librosa.pyin(
+        y,
+        fmin=librosa.note_to_hz("C2"),
+        fmax=librosa.note_to_hz("G6"),
+        sr=sr,
+        center=False,
+    )
+    times = librosa.times_like(f0, sr=sr, hop_length=512, n_fft=2048)
+    # convert F0 sequence to MIDI note sequence
+    notes = librosa.hz_to_midi(f0)
+    return times, notes
 
 
 def find_anno(file, anno_dir=ANNO_DIR):
@@ -34,7 +58,7 @@ def find_anno(file, anno_dir=ANNO_DIR):
     return anno_file
 
 
-def plot_f0_vs_gt(file, audio_dir=MONO_SEGMENTS_DIR, anno_dir=ANNO_DIR):
+def plot_f0_vs_gt(file, anno_dir=ANNO_DIR):
     """Given an audio file name, plot its ground-truth pitches and estimated F0 curve
 
     Args:
@@ -42,17 +66,7 @@ def plot_f0_vs_gt(file, audio_dir=MONO_SEGMENTS_DIR, anno_dir=ANNO_DIR):
         audio_dir (str, optional): The path to the audio directory. Defaults to MONO_SEGMENTS_DIR.
         anno_dir (str, optional): The path to the annotation directory. Defaults to ANNO_DIR.
     """
-    file = os.path.join(audio_dir, file)
-    y, sr = librosa.load(file, sr=None)
-    f0, _, _ = librosa.pyin(
-        y,
-        fmin=librosa.note_to_hz("C2"),
-        fmax=librosa.note_to_hz("G6"),
-        sr=sr,
-        center=False,
-    )
-    times = librosa.times_like(f0, sr=sr, hop_length=512, n_fft=2048)
-    notes = librosa.hz_to_midi(f0)
+    times, notes = load_audio_file(file)
 
     anno_file = find_anno(file, anno_dir=anno_dir)
     with open(anno_file) as anno:
@@ -62,8 +76,8 @@ def plot_f0_vs_gt(file, audio_dir=MONO_SEGMENTS_DIR, anno_dir=ANNO_DIR):
     gt[:] = np.NaN
 
     for note in note_infos:
-        onset = note["time"]["start"] * sr
-        offset = (note["time"]["start"] + note["time"]["dur"]) * sr
+        onset = note["time"]["start"] * SR
+        offset = (note["time"]["start"] + note["time"]["dur"]) * SR
         onset_fr = librosa.samples_to_frames(onset, hop_length=512)
         offset_fr = librosa.samples_to_frames(offset, hop_length=512)
         gt[onset_fr:offset_fr] = note["pitch"]
@@ -111,8 +125,9 @@ def get_note_events_from_f0_segment(
     Args:
         notes (np.Array): The estimated F0 sequence converted to MIDI note sequence
         f0_segment (list): A list of indices that belong to a single continuous F0 segment, obtained from `get_continous_f0_segments(notes)`
-        f0_change_threshold (float, optional): Cut the F0 segment where the difference between two adjacent frames exceeds this threshold. Defaults to 0.5 whole steps.
-        dur_thres (int): The duration threshold for a single note event. Defaults to 80 ms. 
+        f0_change_threshold (float, optional): Cut the F0 segment where the difference between two adjacent frames exceeds this threshold. Defaults to 0.5 semitone.
+        dur_thres (int): The duration threshold for a single note event. Defaults to 80 ms (Chen et al. 2015). 
+        A 1/16 note in 200 bpm is 75ms (see DragonForce). 
 
     Returns:
         list of note events indices: A list of lists. Each list consists of the indices of a note event
@@ -216,9 +231,11 @@ def is_bend_candidate(notes, dur_thres=80):
     )
     condition1 = count_consecutive_rise(diff) >= dur_thres_fr
     # the freq difference between two consectutive frames should be smaller than one semitone
-    condition2 = np.all(abs(diff) <= 0.5)
+    # this is probably always true. if two adjacent frames differ more than 1 semitone,
+    # they would have been put into two separate note events
+    condition2 = np.all(abs(diff) <= 1)
     # the difference between the max and min freq should be more than half a semitone
-    condition3 = max(notes) - min(notes) >= 0.25
+    condition3 = max(notes) - min(notes) >= 0.5
     if condition1 and condition2 and condition3:
         return True
     else:
@@ -245,9 +262,9 @@ def is_release_candidate(notes, dur_thres=80):
     )
     condition1 = count_consecutive_drop(diff) >= dur_thres_fr
     # the freq difference between two consectutive frames should be smaller than one semitone
-    condition2 = np.all(abs(diff) <= 0.5)
+    condition2 = np.all(abs(diff) <= 1)
     # the difference between the max and min freq should be more than half a semitone
-    condition3 = max(notes) - min(notes) >= 0.25
+    condition3 = max(notes) - min(notes) >= 0.5
     if condition1 and condition2 and condition3:
         return True
     else:
@@ -256,7 +273,7 @@ def is_release_candidate(notes, dur_thres=80):
 
 # functions for picking VIBRATO candidates
 def is_vibrato_candidate(
-    notes, peak_count=2, peak_dist_min=60, peak_dist_max=800, pitch_diff=0.5
+    notes, peak_count=2, peak_dist_min=60, peak_dist_max=800, pitch_diff=1
 ):
     """Given the F0 sequence of a note event, predict whether it is a VIBRATO instance。
 
@@ -265,7 +282,7 @@ def is_vibrato_candidate(
         peak_count (int, optional): The note must have more than `peak_count` local maxima. Defaults to 2.
         peak_dist_min (int, optional): The distance between to adjancent peaks must be more than `peak_dist_min` ms. Defaults to 60 ms.
         peak_dist_max (int, optional): The distance between to adjancent peaks must be less than `peak_dist_max` ms. Defaults to 800 ms.
-        pitch_diff (float, optional): The difference between the highest peak and the mean value must be less than `pitch_diff` whole steps. Defaults to 0.5.
+        pitch_diff (float, optional): The difference between the highest peak and the mean value must be less than `pitch_diff` semitones. Defaults to 1.
 
     Returns:
         bool: True for vibrato, False for not vibrato
@@ -284,7 +301,9 @@ def is_vibrato_candidate(
     )
     # True if any two adjacent peaks satisfy the distance threshold
     condition2 = (
-        np.any(peak_dists >= peak_dist_min_fr and peak_dists <= peak_dist_max_fr)
+        np.logical_and(
+            peak_dists >= peak_dist_min_fr, peak_dists <= peak_dist_max_fr
+        ).any()
         if condition1
         else False
     )
@@ -299,9 +318,3 @@ def is_vibrato_candidate(
     else:
         return False
 
-
-def is_hammer_on_candidate(notes):
-    # hammer-on should introduce at least 1 semitone sudden pitch change
-    # all transition between note events are considered hammer-on candidates,
-    # as long as the pitch difference between the two note events are larger than 0.5
-    pass
