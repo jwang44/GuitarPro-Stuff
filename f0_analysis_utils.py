@@ -122,6 +122,10 @@ def get_note_events_from_f0_segment(
 ):
     """Split a continuous F0 segment (on large freq change) into note events
 
+        TODO: Perhaps using an existing onset detection algorithm will give better results.
+        Detect onset on the audio corresponding to each continuous F0 segment. It is safe to assume
+        the current offset happens right before the next onset because each F0 segment is temporally continuous. 
+    
     Args:
         notes (np.Array): The estimated F0 sequence converted to MIDI note sequence
         f0_segment (list): A list of indices that belong to a single continuous F0 segment, obtained from `get_continous_f0_segments(notes)`
@@ -140,7 +144,7 @@ def get_note_events_from_f0_segment(
     note_event = [f0_segment[0]]
     note_events = []
 
-    # this assumes the f0 segment has at least two frames
+    # this assumes the f0 segment has at least two frames (~60 ms)
     for i in f0_segment[1:]:
         if abs(notes[i] - previous_note) <= f0_change_thres:
             note_event.append(i)
