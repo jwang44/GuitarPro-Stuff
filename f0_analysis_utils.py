@@ -8,14 +8,12 @@ FRAMESIZE = 2048
 HOPSIZE = 512
 SR = 44100
 
-MONO_SEGMENTS_DIR = "/Volumes/MacOnly/UG_proc/all_time_top_by_hits/mono_audio_segments"
-ANNO_DIR = (
-    "/Volumes/MacOnly/UG_proc/all_time_top_by_hits/clean_single_track_annotations"
+MONO_SEGMENTS_DIR = (
+    "/Volumes/MacOnly/UG_proc/all_time_top_by_hits/clean_tone/mono_audio_segments"
 )
+ANNO_DIR = "/Volumes/MacOnly/UG_proc/all_time_top_by_hits/clean_tone/clean_single_track_annotations"
 # the directory for preprocessed audio files (mono audio segments that has a reasonable length)
-FILTERED_AUDIO_DIR = (
-    "/Volumes/MacOnly/UG_proc/all_time_top_by_hits/mono_audio_segments_filtered"
-)
+FILTERED_AUDIO_DIR = "/Volumes/MacOnly/UG_proc/all_time_top_by_hits/clean_tone/mono_audio_segments_filtered"
 
 
 def load_audio_file(file):
